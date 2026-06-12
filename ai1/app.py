@@ -3,6 +3,8 @@ import json
 import google.generativeai as genai
 from dotenv import load_dotenv
 
+
+# tools
 def read_file(filename):
     try:
         with open(filename, "r", encoding="utf-8") as f:
@@ -10,13 +12,35 @@ def read_file(filename):
     except Exception as e:
         return str(e)
 
+
 def list_files():
     return os.listdir()
 
+
 def write_file(filename, content):
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(content)
-    return "File written successfully"
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(content)
+        return "File written successfully"
+    except Exception as e:
+        return str(e)
+
+
+def search_web(query):
+    return f"(Mock) Search results for: {query}"
+
+
+# memory
+# def save_memory(history):
+#     with open("memory.json", "w") as f:
+#         json.dump(history, f)
+
+# def load_memory():
+#     try:
+#         with open("memory.json") as f:
+#             return json.load(f)
+#     except:
+#         return []
 
 
 def clean_json(reply):
@@ -27,79 +51,93 @@ def clean_json(reply):
         reply = parts[1]
         if reply.strip().startswith("json"):
             reply = reply.strip()[4:]
-    
+
     return reply.strip()
 
 
 load_dotenv()
-
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 model = genai.GenerativeModel("gemini-2.5-flash")
 
 system_prompt = """
-You are an assistant.
+You are an AI agent.
 
-If you use a tool:
-- Respond with ONLY raw JSON
-- Do NOT use ``` blocks
+You can think step-by-step and use tools.
 
-Example:
+RULES:
+- If you want to use a tool, respond ONLY in JSON
+- Do NOT use markdown
+
+Format:
 {
-  "tool": "read_file",
-  "args": {"filename": "notes.txt"}
+  "thought": "your reasoning",
+  "tool": "tool_name",
+  "args": {}
 }
+
+- If no tool is needed, respond normally
 
 Available tools:
 - read_file(filename)
 - list_files()
 - write_file(filename, content)
+- search_web(query)
 """
 
+
+MAX_TOOL_OUTPUT = 300
+MAX_STEPS = 3
+
+# chat_history = load_memory()
 chat_history = []
+
 
 while True:
     user_input = input("You: ")
 
     if user_input.lower() == "exit":
+        # save_memory(chat_history)
         break
 
-    chat_history.append(f"You: {user_input}")
+    for step in range(MAX_STEPS):
 
-    prompt = system_prompt + "\n" + "\n".join(chat_history)
+        prompt = system_prompt + "\nUser: " + user_input
 
-    response = model.generate_content(prompt)
-    reply = response.text
+        response = model.generate_content(prompt)
+        reply = response.text
 
-    try:
-        cleaned = clean_json(reply)
-        data = json.loads(cleaned)
+        try:
+            cleaned = clean_json(reply)
+            data = json.loads(cleaned)
 
-        tool = data.get("tool")
+            thought = data.get("thought", "")
+            tool = data.get("tool")
+            args = data.get("args", {})
 
-        if tool == "read_file":
-            result = read_file(data["args"]["filename"])
+            print(f"🧠 Thought: {thought}")
 
-        elif tool == "list_files":
-            result = list_files()
+            if tool == "read_file":
+                result = read_file(args.get("filename", ""))
+            elif tool == "list_files":
+                result = list_files()
+            elif tool == "write_file":
+                result = write_file(
+                    args.get("filename", ""),
+                    args.get("content", "")
+                )
+            elif tool == "search_web":
+                result = search_web(args.get("query", ""))
+            else:
+                result = "Unknown tool"
 
-        elif tool == "write_file":
-            result = write_file(
-                data["args"]["filename"],
-                data["args"]["content"]
-            )
+            short_result = str(result)[:MAX_TOOL_OUTPUT]
 
-        else:
-            result = "Unknown tool"
+            print("🔧 Tool Result:\n", short_result)
 
-        print("Tool Result:\n", result)
+            user_input = f"Tool result: {short_result}"
 
-        # ✅ IMPORTANT: give result back to agent
-        chat_history.append(f"Tool result: {result}")
-        continue
+        except Exception:
+            print("AI:", reply, "\n")
+            break
 
-    except Exception:
-        pass
-
-    print("AI:", reply, "\n")
-    chat_history.append(f"AI: {reply}")
